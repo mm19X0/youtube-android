@@ -2,6 +2,8 @@
 
 Native Android app (Kotlin + Jetpack Compose). Paste a YouTube link (or press **Share** in the YouTube app),
 see the thumbnail, choose Video or Audio and the quality, and download to `Downloads/YT-Downloader`.
+Video-only streams are combined with a compatible audio stream during download so higher video
+qualities retain sound.
 
 It uses [NewPipe Extractor](https://github.com/TeamNewPipe/NewPipeExtractor) to read YouTube.
 
