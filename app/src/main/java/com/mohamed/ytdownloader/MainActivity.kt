@@ -386,7 +386,7 @@ fun DownloaderScreen(sharedUrl: String) {
                     }
                     if (!audioMode && details != null) {
                         Text(
-                            "Video here includes sound (usually up to 360p–720p). Higher qualities need merging — coming in the next version.",
+                            "Higher qualities combine separate video and audio streams during download.",
                             color = Muted,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 10.dp),

@@ -2,6 +2,10 @@ package com.mohamed.ytdownloader
 
 import android.content.ContentValues
 import android.content.Context
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
 import android.os.Environment
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
@@ -12,12 +16,22 @@ import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.stream.AudioStream
 import org.schabi.newpipe.extractor.stream.DeliveryMethod
 import org.schabi.newpipe.extractor.stream.StreamInfo
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.IOException
 import java.io.OutputStream
+import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
 
 /** One thing the user can pick: a video quality or an audio format. */
-data class StreamOption(val label: String, val url: String, val ext: String, val mime: String)
+data class StreamOption(
+    val label: String,
+    val url: String,
+    val ext: String,
+    val mime: String,
+    val audioUrl: String? = null,
+)
 
 data class VideoDetails(
     val title: String,
@@ -52,21 +66,56 @@ object YtRepo {
         val info = StreamInfo.getInfo(link)
 
         // Videos that already contain sound (direct download, no merging needed)
-        val videos = info.videoStreams
-            .filter { it.isUrl && it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP }
+        val videosByHeight = info.videoStreams
+            .filter {
+                it.isUrl && !it.isVideoOnly &&
+                    it.deliveryMethod == DeliveryMethod.PROGRESSIVE_HTTP
+            }
             .groupBy { heightOf(it.resolution) }
             .map { (h, list) ->
                 val best = list.firstOrNull { it.format?.suffix == "mp4" } ?: list.first()
-                val option = StreamOption(
+                h to StreamOption(
                     label = if (h > 0) "${h}p" else (best.resolution ?: "Video"),
                     url = best.content,
                     ext = best.format?.suffix ?: "mp4",
                     mime = best.format?.mimeType ?: "video/mp4",
                 )
-                option to h
             }
-            .sortedByDescending { it.second }
-            .map { it.first }
+            .toMap()
+
+        val audioForContainer = info.audioStreams
+            .filter { it.isUrl }
+            .groupBy { it.format?.suffix?.lowercase() }
+        val adaptiveVideos = info.videoOnlyStreams
+            .filter { it.isUrl }
+            .mapNotNull { video ->
+                val suffix = video.format?.suffix?.lowercase() ?: return@mapNotNull null
+                val audioSuffix = when (suffix) {
+                    "mp4" -> "m4a"
+                    "webm" -> "webm"
+                    else -> return@mapNotNull null
+                }
+                val audio = audioForContainer[audioSuffix]
+                    ?.maxByOrNull { it.averageBitrate }
+                    ?: return@mapNotNull null
+                val height = heightOf(video.resolution)
+                if (height == 0 || height in videosByHeight) return@mapNotNull null
+
+                val ext = if (suffix == "webm") "webm" else "mp4"
+                height to StreamOption(
+                    label = "${height}p",
+                    url = video.content,
+                    ext = ext,
+                    mime = if (ext == "webm") "video/webm" else "video/mp4",
+                    audioUrl = audio.content,
+                )
+            }
+            .distinctBy { it.first }
+            .toMap()
+
+        val videos = (videosByHeight + adaptiveVideos)
+            .toSortedMap(compareByDescending { it })
+            .values
 
         // Audio only (M4A first because it plays everywhere)
         val audios = info.audioStreams
@@ -119,7 +168,31 @@ object YtRepo {
 
         try {
             val out = resolver.openOutputStream(uri) ?: throw IOException("Could not open the file")
-            out.use { copyInChunks(option.url, it, onProgress) }
+            out.use {
+                if (option.audioUrl == null) {
+                    copyInChunks(option.url, it, onProgress)
+                } else {
+                    val videoFile = File.createTempFile("yt-video-", ".stream", context.cacheDir)
+                    val audioFile = File.createTempFile("yt-audio-", ".stream", context.cacheDir)
+                    val mergedFile = File.createTempFile("yt-merged-", ".${option.ext}", context.cacheDir)
+                    try {
+                        FileOutputStream(videoFile).use { videoOut ->
+                            copyInChunks(option.url, videoOut) { onProgress(it * 0.45f) }
+                        }
+                        FileOutputStream(audioFile).use { audioOut ->
+                            copyInChunks(option.audioUrl, audioOut) { onProgress(0.45f + it * 0.45f) }
+                        }
+                        muxStreams(videoFile, audioFile, mergedFile, option.ext)
+                        onProgress(0.9f)
+                        FileInputStream(mergedFile).use { input -> input.copyTo(it) }
+                        onProgress(1f)
+                    } finally {
+                        videoFile.delete()
+                        audioFile.delete()
+                        mergedFile.delete()
+                    }
+                }
+            }
             values.clear()
             values.put(MediaStore.Downloads.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
@@ -128,6 +201,100 @@ object YtRepo {
             throw e
         }
         fileName
+    }
+
+    private data class MuxSample(val size: Int, val timeUs: Long, val flags: Int)
+
+    private fun muxStreams(videoFile: File, audioFile: File, outputFile: File, ext: String) {
+        val videoExtractor = MediaExtractor()
+        val audioExtractor = MediaExtractor()
+        var muxer: MediaMuxer? = null
+        var muxerStarted = false
+        var muxingCompleted = false
+        try {
+            videoExtractor.setDataSource(videoFile.absolutePath)
+            audioExtractor.setDataSource(audioFile.absolutePath)
+            val videoTrack = findTrack(videoExtractor, "video/")
+            val audioTrack = findTrack(audioExtractor, "audio/")
+            videoExtractor.selectTrack(videoTrack)
+            audioExtractor.selectTrack(audioTrack)
+
+            val outputFormat = if (ext == "webm") {
+                MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
+            } else {
+                MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+            }
+            val activeMuxer = MediaMuxer(outputFile.absolutePath, outputFormat)
+            muxer = activeMuxer
+            val outputVideoTrack = activeMuxer.addTrack(videoExtractor.getTrackFormat(videoTrack))
+            val outputAudioTrack = activeMuxer.addTrack(audioExtractor.getTrackFormat(audioTrack))
+            val videoBuffer = sampleBuffer(videoExtractor.getTrackFormat(videoTrack))
+            val audioBuffer = sampleBuffer(audioExtractor.getTrackFormat(audioTrack))
+            var videoSample = readSample(videoExtractor, videoBuffer)
+            var audioSample = readSample(audioExtractor, audioBuffer)
+            if (videoSample == null || audioSample == null) {
+                throw IOException("The video or audio stream is empty")
+            }
+
+            activeMuxer.start()
+            muxerStarted = true
+            while (videoSample != null || audioSample != null) {
+                val writeVideo = audioSample == null ||
+                    (videoSample != null && videoSample.timeUs <= audioSample.timeUs)
+                val extractor = if (writeVideo) videoExtractor else audioExtractor
+                val buffer = if (writeVideo) videoBuffer else audioBuffer
+                val sample = if (writeVideo) videoSample!! else audioSample!!
+                val track = if (writeVideo) outputVideoTrack else outputAudioTrack
+                val info = MediaCodec.BufferInfo().apply {
+                    set(0, sample.size, sample.timeUs, sample.flags)
+                }
+                activeMuxer.writeSampleData(track, buffer, info)
+                extractor.advance()
+                if (writeVideo) {
+                    videoSample = readSample(videoExtractor, videoBuffer)
+                } else {
+                    audioSample = readSample(audioExtractor, audioBuffer)
+                }
+            }
+            muxingCompleted = true
+        } finally {
+            try {
+                if (muxerStarted && muxingCompleted) muxer?.stop()
+            } finally {
+                try {
+                    muxer?.release()
+                } finally {
+                    videoExtractor.release()
+                    audioExtractor.release()
+                }
+            }
+        }
+    }
+
+    private fun findTrack(extractor: MediaExtractor, mimePrefix: String): Int {
+        for (index in 0 until extractor.trackCount) {
+            val mime = extractor.getTrackFormat(index).getString(MediaFormat.KEY_MIME)
+            if (mime?.startsWith(mimePrefix) == true) return index
+        }
+        throw IOException("Could not find a $mimePrefix track to merge")
+    }
+
+    private fun sampleBuffer(format: MediaFormat): ByteBuffer {
+        val inputSize = if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+            format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+        } else {
+            0
+        }
+        return ByteBuffer.allocateDirect(maxOf(inputSize, 4 * 1024 * 1024))
+    }
+
+    private fun readSample(extractor: MediaExtractor, buffer: ByteBuffer): MuxSample? {
+        buffer.clear()
+        val size = extractor.readSampleData(buffer, 0)
+        if (size < 0) return null
+        val timeUs = extractor.sampleTime
+        if (timeUs < 0) throw IOException("Invalid stream timestamp")
+        return MuxSample(size, timeUs, extractor.sampleFlags)
     }
 
     /**
