@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.YTDownloader" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#121217</item>
+        <item name="android:statusBarColor">#121217</item>
+        <item name="android:navigationBarColor">#121217</item>
+    </style>
+</resources>
