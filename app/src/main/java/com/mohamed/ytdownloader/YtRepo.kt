@@ -116,6 +116,7 @@ object YtRepo {
         val videos = (videosByHeight + adaptiveVideos)
             .toSortedMap(compareByDescending { it })
             .values
+            .toList()
 
         // Audio only (M4A first because it plays everywhere)
         val audios = info.audioStreams
