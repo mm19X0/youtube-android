@@ -42,6 +42,7 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.1.5")
+    implementation("com.google.android.gms:play-services-ads:25.5.0")
 
     // The engine that understands YouTube (same library NewPipe uses)
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.26.5")

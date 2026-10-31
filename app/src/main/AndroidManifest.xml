@@ -9,6 +9,10 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.YTDownloader">
 
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-3763633368494610~9332778030" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

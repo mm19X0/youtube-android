@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -51,7 +52,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import coil.compose.AsyncImage
+import com.google.android.gms.ads.AdRequest
+import com.google.android.gms.ads.AdSize
+import com.google.android.gms.ads.AdView
+import com.google.android.gms.ads.MobileAds
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
@@ -69,13 +75,17 @@ class MainActivity : ComponentActivity() {
 
     // A link shared from the YouTube app ("Share" -> YT Downloader)
     private var sharedUrl by mutableStateOf("")
+    private var adsInitialized by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         YtRepo.init()
         readSharedLink(intent)
+        MobileAds.initialize(this) {
+            adsInitialized = true
+        }
         setContent {
-            AppTheme { DownloaderScreen(sharedUrl) }
+            AppTheme { DownloaderScreen(sharedUrl, adsInitialized) }
         }
     }
 
@@ -132,7 +142,7 @@ private fun ToggleButton(text: String, selected: Boolean, modifier: Modifier = M
 }
 
 @Composable
-fun DownloaderScreen(sharedUrl: String) {
+fun DownloaderScreen(sharedUrl: String, adsInitialized: Boolean) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboardManager.current
@@ -236,6 +246,23 @@ fun DownloaderScreen(sharedUrl: String) {
                     colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color.White),
                 ) {
                     Text(if (busy) "Downloading..." else "Download", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                }
+                if (adsInitialized) {
+                    AndroidView(
+                        factory = { context ->
+                            AdView(context).apply {
+                                setAdSize(AdSize.BANNER)
+                                adUnitId = "ca-app-pub-3763633368494610/1724208762"
+                                loadAd(AdRequest.Builder().build())
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.CenterHorizontally)
+                            .padding(top = 12.dp)
+                            .width(AdSize.BANNER.width.dp)
+                            .height(AdSize.BANNER.height.dp),
+                        onRelease = { adView -> adView.destroy() },
+                    )
                 }
             }
         },
