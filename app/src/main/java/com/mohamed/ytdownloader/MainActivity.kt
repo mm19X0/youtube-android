@@ -117,6 +117,23 @@ fun AppTheme(content: @Composable () -> Unit) {
     )
 }
 
+@Composable
+fun AdMobBanner(modifier: Modifier = Modifier) {
+    AndroidView(
+        factory = { context ->
+            AdView(context).apply {
+                setAdSize(AdSize.BANNER)
+                adUnitId = "ca-app-pub-3763633368494610/1724208762"
+                loadAd(AdRequest.Builder().build())
+            }
+        },
+        modifier = modifier
+            .width(AdSize.BANNER.width.dp)
+            .height(AdSize.BANNER.height.dp),
+        onRelease = { adView -> adView.destroy() },
+    )
+}
+
 private fun formatDuration(totalSeconds: Long): String {
     if (totalSeconds <= 0) return "--:--"
     val h = totalSeconds / 3600
@@ -248,20 +265,10 @@ fun DownloaderScreen(sharedUrl: String, adsInitialized: Boolean) {
                     Text(if (busy) "Downloading..." else "Download", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                 }
                 if (adsInitialized) {
-                    AndroidView(
-                        factory = { context ->
-                            AdView(context).apply {
-                                setAdSize(AdSize.BANNER)
-                                adUnitId = "ca-app-pub-3763633368494610/1724208762"
-                                loadAd(AdRequest.Builder().build())
-                            }
-                        },
+                    AdMobBanner(
                         modifier = Modifier
                             .align(Alignment.CenterHorizontally)
-                            .padding(top = 12.dp)
-                            .width(AdSize.BANNER.width.dp)
-                            .height(AdSize.BANNER.height.dp),
-                        onRelease = { adView -> adView.destroy() },
+                            .padding(top = 12.dp),
                     )
                 }
             }
