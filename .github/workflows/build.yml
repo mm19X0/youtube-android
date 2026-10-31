@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -16,10 +16,9 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # تحديد الحزم بوضوح لتجنب البحث عن الحزمة القديمة 'tools'
       - uses: android-actions/setup-android@v3
-  with:
-    packages: 'platforms;android-35 build-tools;35.0.0 platform-tools
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0 platform-tools'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
