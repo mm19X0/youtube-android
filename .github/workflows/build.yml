@@ -16,9 +16,11 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # خطوة إعداد بيئة الأندرويد الناقصة
+      # تحديد الحزم بوضوح لتجنب البحث عن الحزمة القديمة 'tools'
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-34' 'build-tools;34.0.0' 'platform-tools'
 
       - uses: gradle/actions/setup-gradle@v4
         with:
